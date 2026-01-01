@@ -288,7 +288,10 @@ Use `.claude/scripts/context-check.sh` for assessment.
 ├── check-prerequisites.sh    # Phase prerequisites
 ├── validate-sprint-id.sh     # Sprint ID validation
 ├── mcp-registry.sh           # MCP registry queries
-└── validate-mcp.sh           # MCP configuration validation
+├── validate-mcp.sh           # MCP configuration validation
+├── registry-loader.sh        # Registry skill loader
+├── registry-lib.sh           # Registry shared utilities
+└── license-validator.sh      # JWT license validation
 ```
 
 ## Integrations
@@ -316,6 +319,69 @@ integrations:
       fallback: "Tasks remain local"
 ```
 
+## Registry Integration
+
+Commercial skills from the Loa Skills Registry (`api.loaskills.dev`).
+
+### Directory Structure
+
+```
+.claude/registry/
+├── skills/{vendor}/{slug}/    # Installed skills
+│   ├── .license.json          # JWT license token
+│   ├── index.yaml             # Skill metadata
+│   └── SKILL.md               # Instructions
+├── packs/{name}/              # Skill packs
+│   ├── .license.json          # Pack license
+│   └── skills/                # Bundled skills
+└── .registry-meta.json        # Installation state
+```
+
+### Loading Priority
+
+| Priority | Source | License |
+|----------|--------|---------|
+| 1 | Local (`.claude/skills/`) | No |
+| 2 | Override (`.claude/overrides/skills/`) | No |
+| 3 | Registry (`.claude/registry/skills/`) | Yes |
+| 4 | Pack (`.claude/registry/packs/.../skills/`) | Yes |
+
+Local skills always win. Conflicts resolved silently by priority.
+
+### License Validation
+
+- **RS256 JWT** signatures verified against registry public keys
+- **Grace periods**: 24h (individual/pro), 72h (team), 168h (enterprise)
+- **Offline support**: Cached keys enable offline validation
+- **Exit codes**: 0=valid, 1=grace, 2=expired, 3=missing, 4=invalid, 5=error
+
+### CLI Commands
+
+```bash
+registry-loader.sh list              # Show skills with status
+registry-loader.sh loadable          # Get loadable skill paths
+registry-loader.sh validate <dir>    # Validate single skill
+registry-loader.sh check-updates     # Check for updates
+```
+
+### Configuration
+
+```yaml
+# .loa.config.yaml
+registry:
+  enabled: true
+  offline_grace_hours: 24
+  check_updates_on_setup: true
+```
+
+**Environment overrides** (highest priority):
+- `LOA_REGISTRY_URL` - API endpoint
+- `LOA_OFFLINE_GRACE_HOURS` - Grace period
+- `LOA_REGISTRY_ENABLED` - Master toggle
+- `LOA_OFFLINE=1` - Force offline mode
+
+**Protocol**: See `.claude/protocols/registry-integration.md`
+
 ## Key Conventions
 
 - **Never skip phases** - each builds on previous
@@ -335,6 +401,7 @@ integrations:
   - `feedback-loops.md` - Quality gates
   - `git-safety.md` - Template protection
   - `change-validation.md` - Pre-implementation validation
+  - `registry-integration.md` - Registry skill loading
   - **v0.9.0 Lossless Ledger Protocol**:
   - `session-continuity.md` - Session lifecycle and recovery
   - `grounding-enforcement.md` - Citation requirements
