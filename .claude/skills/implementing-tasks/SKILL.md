@@ -15,6 +15,26 @@ zones:
 
 # Sprint Task Implementer
 
+<critical_requirements>
+## ⚠️ MANDATORY REQUIREMENTS - NEVER SKIP ⚠️
+
+These requirements are NON-NEGOTIABLE regardless of context length:
+
+1. **GPT REVIEW AFTER EVERY TASK** (if enabled in config)
+   - A task is NOT complete until GPT review passes
+   - Run `.claude/scripts/gpt-review-api.sh` after EACH task
+   - Do NOT move to the next task until current task is GPT-approved
+
+2. **CHECK FEEDBACK BEFORE NEW WORK**
+   - Always check audit feedback first
+   - Always check engineer feedback second
+
+3. **WRITE TESTS FOR EVERY TASK**
+   - No exceptions
+
+**If you find yourself about to skip any of these: STOP and do them.**
+</critical_requirements>
+
 <objective>
 Implement sprint tasks from `grimoires/loa/sprint.md` with production-grade code and comprehensive tests. Generate detailed implementation report at `grimoires/loa/a2a/sprint-N/reviewer.md`. Address feedback iteratively until senior lead and security auditor approve.
 </objective>
@@ -128,6 +148,8 @@ Implement sprint tasks from `grimoires/loa/sprint.md` with production-grade code
 - DO NOT skip tests—comprehensive test coverage is non-negotiable
 - DO NOT ignore existing codebase patterns—follow established conventions
 - DO NOT skip reading context files—always review PRD, SDD, sprint.md
+- **DO NOT skip GPT review after each task (if enabled)—this is MANDATORY**
+- **DO NOT move to next task until current task passes GPT review**
 - DO link implementations to source discussions if integration context requires
 - DO update relevant documentation if specified in integration context
 - DO format commits per org standards if defined
@@ -318,7 +340,21 @@ The user only runs `/implement sprint-1`. All bd commands are invisible.
 4. **Consider** performance, security, scalability
 5. **Handle** edge cases and errors gracefully
 6. **Write tests** for the task
-7. **GPT Review** (if enabled) - review THIS task before moving to next
+7. **GPT Review** (if enabled) - **MANDATORY GATE - DO NOT SKIP**
+8. **Only after GPT approval** → Move to next task
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  TASK COMPLETION CHECKLIST (all must be true):          │
+│                                                         │
+│  □ Code implemented                                     │
+│  □ Tests written and passing                            │
+│  □ GPT review completed (if enabled)                    │
+│  □ GPT verdict = APPROVED                               │
+│                                                         │
+│  ⚠️  DO NOT PROCEED TO NEXT TASK UNTIL ALL CHECKED     │
+└─────────────────────────────────────────────────────────┘
+```
 
 **Testing Requirements:**
 - Comprehensive unit tests for all new code
@@ -332,13 +368,22 @@ The user only runs `/implement sprint-1`. All bd commands are invisible.
 - DRY principles
 - Consistent formatting
 
-## GPT Code Review - Per Task (If Enabled)
+## GPT Code Review - Per Task (MANDATORY WHEN ENABLED)
 
-**IMPORTANT: GPT reviews EACH TASK, not the whole sprint.**
+```
+╔══════════════════════════════════════════════════════════════╗
+║  ⚠️  THIS STEP IS MANDATORY - DO NOT SKIP                    ║
+║                                                              ║
+║  If GPT review is enabled in config, you MUST run it after  ║
+║  EVERY task. No exceptions. No "I'll do it later."          ║
+║                                                              ║
+║  A task without GPT review is an INCOMPLETE task.            ║
+╚══════════════════════════════════════════════════════════════╝
+```
 
-After completing each task (code + tests), run GPT review before moving to the next task. This keeps the review scope small and focused.
+GPT reviews EACH TASK, not the whole sprint. After completing each task (code + tests), run GPT review before moving to the next task. This keeps the review scope small and focused.
 
-**Check if enabled:**
+**Check if enabled (do this ONCE at sprint start, remember the result):**
 ```bash
 gpt_enabled=$(yq eval '.gpt_review.enabled // false' .loa.config.yaml)
 impl_enabled=$(yq eval '.gpt_review.phases.implementation // false' .loa.config.yaml)
