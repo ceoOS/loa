@@ -5,6 +5,174 @@ All notable changes to Loa will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-01-19 — Run Mode AI (Autonomous Initiation)
+
+### Why This Release
+
+This is **Loa's first major release** — a milestone that marks the framework's evolution from experimental agent orchestration to production-ready autonomous development. **Run Mode AI** ("AI" = Autonomous Initiation) represents the culmination of 19 iterative releases, 6 development cycles, and comprehensive battle-testing across real-world projects.
+
+Loa 1.0.0 delivers:
+
+1. **Autonomous Sprint Execution**: `/run sprint-N` executes complete implement → review → audit cycles without human intervention
+2. **Multi-Sprint Orchestration**: `/run sprint-plan` executes entire sprint plans, creating a single draft PR
+3. **4-Level Safety Defense**: ICE Layer, Circuit Breaker, Opt-In, and Visibility controls prevent runaway execution
+4. **Continuous Learning**: Agents extract non-obvious discoveries into reusable skills
+5. **Intelligent Subagents**: Specialized validation (architecture, security, tests) with automated quality gates
+6. **Documentation Coherence**: Every task ships with its documentation — no batching at sprint end
+
+### Major Features Summary
+
+This release bundles all capabilities developed since v0.1.0:
+
+#### Core Framework
+- **9 Specialized AI Agents** orchestrating the complete product lifecycle
+- **Three-Zone Model**: System (`.claude/`), State (`grimoires/`), App (`src/`)
+- **Enterprise-Grade Managed Scaffolding** inspired by AWS Projen, Copier, Google ADK
+- **3-Level Skills Architecture**: Metadata → Instructions → Resources
+
+#### Autonomous Execution (v0.18.0)
+- **`/run sprint-N`** — Single sprint autonomous execution
+- **`/run sprint-plan`** — Multi-sprint execution with single PR
+- **`/run-status`** — Progress monitoring with circuit breaker state
+- **`/run-halt`** — Graceful stop with incomplete PR creation
+- **`/run-resume`** — Checkpoint-based continuation
+- **ICE Layer** — Git safety wrapper blocking protected branches
+- **Circuit Breaker** — Halts on same-issue repetition, no progress, cycle limits
+
+#### Continuous Learning (v0.17.0)
+- **`/retrospective`** — Manual skill extraction from session
+- **`/skill-audit`** — Lifecycle management (approve, reject, prune, stats)
+- **Four Quality Gates**: Discovery Depth, Reusability, Trigger Clarity, Verification
+- **Phase Gating**: Enabled during implement/review/audit/deploy phases
+
+#### Intelligent Subagents (v0.16.0)
+- **`/validate`** command with architecture, security, tests, docs subagents
+- **architecture-validator** — SDD compliance checking
+- **security-scanner** — OWASP Top 10 vulnerability detection
+- **test-adequacy-reviewer** — Test quality assessment
+- **documentation-coherence** — Per-task documentation validation (v0.19.0)
+
+#### Context Management (v0.9.0-v0.15.0)
+- **Lossless Ledger Protocol** — "Clear, Don't Compact" paradigm
+- **Session Continuity** — Tiered recovery (L1: ~100 tokens, L2: ~500, L3: full)
+- **Grounding Enforcement** — 95% citation requirement before `/clear`
+- **Sprint Ledger** — Global sprint numbering across development cycles
+- **RLM Pattern** — Probe-before-load achieving 29.3% token reduction
+
+#### Developer Experience
+- **Frictionless Permissions** — 150+ pre-approved commands (npm, git, docker, etc.)
+- **Permission Audit** — HITL request logging and analysis
+- **Auto-Update Check** — Session-start version checking
+- **MCP Configuration Examples** — Pre-built integrations for Slack, GitHub, Sentry, Postgres
+
+#### Mount & Ride Workflow (v0.7.0)
+- **`/mount`** — Install Loa onto existing repositories
+- **`/ride`** — Analyze codebase, generate evidence-grounded docs
+- **Drift Detection** — Three-way analysis: Code vs Docs vs Context
+- **Ghost Feature Detection** — Identifies documented but unimplemented features
+
+### Removed Phases
+- **`/setup` command** — No longer needed (v0.15.0). Start directly with `/plan-and-analyze`
+- **Phase 0** — THJ detection via `LOA_CONSTRUCTS_API_KEY` environment variable
+
+### Complete Workflow
+
+```
+Phase 1:   /plan-and-analyze  → grimoires/loa/prd.md
+Phase 2:   /architect         → grimoires/loa/sdd.md
+Phase 3:   /sprint-plan       → grimoires/loa/sprint.md
+Phase 4:   /implement sprint-N → Code + reviewer.md
+Phase 5:   /review-sprint     → engineer-feedback.md
+Phase 5.5: /audit-sprint      → auditor-sprint-feedback.md + COMPLETED marker
+Phase 6:   /deploy-production → deployment/
+
+Autonomous: /run sprint-N      → Draft PR with full cycle execution
+            /run sprint-plan   → Multi-sprint Draft PR
+```
+
+### Full Agent Roster (The Loa)
+
+| Agent | Role | Output |
+|-------|------|--------|
+| `discovering-requirements` | Senior Product Manager | PRD |
+| `designing-architecture` | Software Architect | SDD |
+| `planning-sprints` | Technical PM | Sprint Plan |
+| `implementing-tasks` | Senior Engineer | Code + Report |
+| `reviewing-code` | Tech Lead | Approval/Feedback |
+| `auditing-security` | Security Auditor | Security Approval |
+| `deploying-infrastructure` | DevOps Architect | Infrastructure |
+| `translating-for-executives` | Developer Relations | Summaries |
+| `run-mode` | Autonomous Executor | Draft PR + State |
+
+### Configuration Reference
+
+```yaml
+# .loa.config.yaml (v1.0.0)
+persistence_mode: standard        # standard | stealth
+integrity_enforcement: strict     # strict | warn | disabled
+
+grounding:
+  enforcement: warn               # strict | warn | disabled
+  threshold: 0.95
+
+run_mode:
+  enabled: false                  # IMPORTANT: Explicit opt-in
+  defaults:
+    max_cycles: 20
+    timeout_hours: 8
+  circuit_breaker:
+    same_issue_threshold: 3
+    no_progress_threshold: 5
+
+continuous_learning:
+  enabled: true
+  auto_extract: true
+  require_approval: true
+
+agent_skills:
+  enabled: true
+  load_mode: dynamic              # dynamic | eager
+```
+
+### Breaking Changes
+
+None from v0.19.0. All existing projects continue to work unchanged.
+
+**From earlier versions (pre-v0.15.0)**:
+- `/setup` command removed — start with `/plan-and-analyze`
+- `/update` renamed to `/update-loa`
+- `loa-grimoire/` migrated to `grimoires/loa/`
+
+### Security
+
+All 19 releases passed security audits:
+- No hardcoded credentials
+- All scripts use `set -euo pipefail`
+- Shell safety (`shellcheck` compliant)
+- Input validation on all user-facing scripts
+- Path traversal prevention
+- Test isolation with `BATS_TMPDIR`
+
+### Test Coverage
+
+| Category | Count |
+|----------|-------|
+| Unit Tests | 700+ |
+| Integration Tests | 180+ |
+| Edge Case Tests | 100+ |
+
+### Acknowledgments
+
+This major release represents the collective efforts of multiple development cycles:
+- **cycle-001**: Foundation, Managed Scaffolding, Lossless Ledger Protocol
+- **cycle-002**: Semantic Search, Mount & Ride, Context Improvements
+- **cycle-003**: Sprint Ledger, Auto-Update, Anthropic Oracle
+- **cycle-004**: Continuous Learning Skill
+- **cycle-005**: Run Mode, Permission Audit
+- **cycle-006**: Documentation Coherence
+
+---
+
 ## [0.19.0] - 2026-01-19
 
 ### Why This Release
@@ -1816,6 +1984,12 @@ loa-grimoire/           # Loa process artifacts
 └── deployment/         # Production infrastructure docs
 ```
 
+[1.0.0]: https://github.com/0xHoneyJar/loa/releases/tag/v1.0.0
+[0.19.0]: https://github.com/0xHoneyJar/loa/releases/tag/v0.19.0
+[0.18.0]: https://github.com/0xHoneyJar/loa/releases/tag/v0.18.0
+[0.17.0]: https://github.com/0xHoneyJar/loa/releases/tag/v0.17.0
+[0.16.0]: https://github.com/0xHoneyJar/loa/releases/tag/v0.16.0
+[0.15.0]: https://github.com/0xHoneyJar/loa/releases/tag/v0.15.0
 [0.14.0]: https://github.com/0xHoneyJar/loa/releases/tag/v0.14.0
 [0.13.0]: https://github.com/0xHoneyJar/loa/releases/tag/v0.13.0
 [0.12.0]: https://github.com/0xHoneyJar/loa/releases/tag/v0.12.0

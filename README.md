@@ -1,11 +1,12 @@
 # Loa
 
-[![Version](https://img.shields.io/badge/version-0.19.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-green.svg)](LICENSE.md)
+[![Release](https://img.shields.io/badge/release-Run%20Mode%20AI-purple.svg)](CHANGELOG.md#100---2026-01-19--run-mode-ai-autonomous-initiation)
 
 > *"The Loa are pragmatic entities... They're not worshipped for salvation—they're worked with for practical results."*
 
-Agent-driven development framework using 8 specialized AI agents to orchestrate the complete product lifecycle—from requirements through production deployment. Built with enterprise-grade managed scaffolding.
+**Run Mode AI** (Autonomous Initiation) — Agent-driven development framework using 9 specialized AI agents to orchestrate the complete product lifecycle—from requirements through production deployment. Now with **autonomous sprint execution** and **continuous learning**. Built with enterprise-grade managed scaffolding.
 
 ## Prerequisites
 
@@ -97,7 +98,7 @@ Loa uses a **managed scaffolding** architecture inspired by AWS Projen, Copier, 
 
 ## The Agents (The Loa)
 
-Eight specialized agents that ride alongside you:
+Nine specialized agents that ride alongside you:
 
 1. **discovering-requirements** - Senior Product Manager
 2. **designing-architecture** - Software Architect
@@ -107,8 +108,45 @@ Eight specialized agents that ride alongside you:
 6. **deploying-infrastructure** - DevOps Architect
 7. **auditing-security** - Security Auditor
 8. **translating-for-executives** - Developer Relations
+9. **run-mode** - Autonomous Executor (v1.0.0)
 
 ## Key Features
+
+### Run Mode AI (v1.0.0)
+
+Autonomous sprint execution with human-in-the-loop shifted to PR review:
+
+```bash
+# Execute single sprint autonomously
+/run sprint-1
+
+# Execute entire sprint plan
+/run sprint-plan
+
+# Monitor progress
+/run-status
+
+# Graceful stop
+/run-halt
+```
+
+**4-Level Safety Defense**:
+1. **ICE Layer** — Blocks push to protected branches, merge operations
+2. **Circuit Breaker** — Halts on same-issue repetition, no progress
+3. **Opt-In** — Requires explicit `run_mode.enabled: true`
+4. **Visibility** — Draft PRs only, deleted files prominently displayed
+
+See **[CLAUDE.md](CLAUDE.md#run-mode-v0180)** for full documentation.
+
+### Continuous Learning (v0.17.0)
+
+Agents extract non-obvious discoveries into reusable skills:
+
+```bash
+/retrospective           # Extract skills from session
+/skill-audit --pending   # Review pending skills
+/skill-audit --approve   # Approve skill for use
+```
 
 ### Loa Constructs (Commercial Skills)
 
