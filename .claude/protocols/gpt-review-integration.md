@@ -149,10 +149,28 @@ Parse JSON response and handle verdict:
 
 To prevent infinite loops:
 
-1. **First review**: GPT is thorough - gets ALL issues and recommendations out in one pass
-2. **Subsequent reviews**: GPT ONLY evaluates if previous feedback was addressed
-3. **No new recommendations** on subsequent passes (unless changes introduced new concerns)
-4. **Converge to APPROVED** once previous feedback is satisfactorily addressed
+1. **First review (iteration 1)**: GPT reviews with full prompt - finds all issues and recommendations
+2. **Re-review (iteration 2+)**: GPT receives previous findings and ONLY checks if they were fixed
+3. **Previous context passed**: Each re-review includes the previous response so GPT knows what to verify
+4. **Max iterations safeguard**: After `max_iterations` (default: 3), auto-approve with note
+5. **Document reviews are collaborative**: PRD, SDD, Sprint prompts bias toward approval
+6. **Code reviews remain strict**: Security and bugs need hard scrutiny
+
+### How Re-Review Works
+
+```bash
+# First review (iteration 1)
+gpt-review-api.sh sdd content.md
+
+# Re-review after fixes (iteration 2)
+gpt-review-api.sh sdd content.md --iteration 2 --previous /tmp/previous-response.json
+```
+
+The re-review prompt tells GPT:
+- "Here's what you found before"
+- "Were those issues fixed correctly?"
+- "Did the fixes introduce any NEW MAJOR problems?"
+- "Don't find new nitpicks - converge to approval"
 
 ## API Configuration
 
@@ -164,9 +182,10 @@ gpt_review:
   api_key_env: "OPENAI_API_KEY"
   timeout_seconds: 300
   max_retries: 3
+  max_iterations: 3          # Auto-approve after N iterations (prevents infinite loops)
   models:
-    documents: "gpt-5.2"     # High reasoning for PRD, SDD, Sprint reviews
-    code: "gpt-5.2-codex"     # Code-optimized for implementation reviews
+    documents: "gpt-5.2"     # Collaborative reviewer for PRD, SDD, Sprint
+    code: "gpt-5.2-codex"    # Strict auditor for implementation reviews
   phases:
     prd: true
     sdd: true
@@ -186,13 +205,21 @@ gpt_review:
 
 ## Prompt System
 
-### Base Prompts
+### Base Prompts (First Review)
 
 Located in `.claude/prompts/gpt-review/base/`:
-- `code-review.md` - Code implementation review
-- `prd-review.md` - Product requirements review
-- `sdd-review.md` - Software design review
-- `sprint-review.md` - Sprint plan review
+- `code-review.md` - Code review (strict auditor - finds bugs, security, fabrication)
+- `prd-review.md` - PRD review (collaborative - biases toward approval)
+- `sdd-review.md` - SDD review (collaborative - biases toward approval)
+- `sprint-review.md` - Sprint plan review (collaborative - biases toward approval)
+
+### Re-Review Prompt (Iteration 2+)
+
+- `re-review.md` - Used for all re-reviews regardless of type
+  - Receives previous findings via `{{PREVIOUS_FINDINGS}}` placeholder
+  - Focuses ONLY on "were issues fixed, any new major problems?"
+  - Explicitly tells GPT NOT to find new nitpicks
+  - Converges toward approval
 
 ### Augmentation
 

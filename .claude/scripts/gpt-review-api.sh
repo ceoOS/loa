@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # GPT 5.2 API interaction for cross-model review
 #
-# Usage: gpt-review-api.sh <review_type> <content_file> [augmentation_file]
+# Usage: gpt-review-api.sh <review_type> <content_file> [options]
 #
 # Arguments:
 #   review_type: prd | sdd | sprint | code
 #   content_file: File containing content to review
-#   augmentation_file: Optional file with project-specific context
+#
+# Options:
+#   --augmentation <file>  Project-specific context file
+#   --iteration <N>        Review iteration (1 = first review, 2+ = re-review)
+#   --previous <file>      Previous findings JSON file (for re-review)
 #
 # Environment:
 #   OPENAI_API_KEY - Required
@@ -42,6 +46,9 @@ DEFAULT_TIMEOUT=300
 MAX_RETRIES=3
 RETRY_DELAY=5
 
+# Default max iterations before auto-approve
+DEFAULT_MAX_ITERATIONS=3
+
 log() {
   echo "[gpt-review-api] $*" >&2
 }
@@ -53,10 +60,15 @@ error() {
 # Load configuration from .loa.config.yaml if available
 load_config() {
   if [[ -f "$CONFIG_FILE" ]] && command -v yq &>/dev/null; then
-    local timeout_val
+    local timeout_val max_iter_val
     timeout_val=$(yq eval '.gpt_review.timeout_seconds // ""' "$CONFIG_FILE" 2>/dev/null || echo "")
     if [[ -n "$timeout_val" && "$timeout_val" != "null" ]]; then
       GPT_REVIEW_TIMEOUT="${GPT_REVIEW_TIMEOUT:-$timeout_val}"
+    fi
+
+    max_iter_val=$(yq eval '.gpt_review.max_iterations // ""' "$CONFIG_FILE" 2>/dev/null || echo "")
+    if [[ -n "$max_iter_val" && "$max_iter_val" != "null" ]]; then
+      MAX_ITERATIONS="$max_iter_val"
     fi
 
     # Model overrides from config
@@ -75,8 +87,8 @@ load_config() {
   fi
 }
 
-# Build the system prompt
-build_system_prompt() {
+# Build the system prompt for first review
+build_first_review_prompt() {
   local review_type="$1"
   local augmentation_file="${2:-}"
 
@@ -93,6 +105,35 @@ build_system_prompt() {
   # Append augmentation if provided
   if [[ -n "$augmentation_file" && -f "$augmentation_file" ]]; then
     system_prompt+=$'\n\n## Project-Specific Context (Added by Claude)\n\n'
+    system_prompt+=$(cat "$augmentation_file")
+  fi
+
+  echo "$system_prompt"
+}
+
+# Build the system prompt for re-review (iteration 2+)
+build_re_review_prompt() {
+  local iteration="$1"
+  local previous_findings="$2"
+  local augmentation_file="${3:-}"
+
+  local re_review_file="${PROMPTS_DIR}/re-review.md"
+
+  if [[ ! -f "$re_review_file" ]]; then
+    error "Re-review prompt not found: $re_review_file"
+    exit 2
+  fi
+
+  local system_prompt
+  system_prompt=$(cat "$re_review_file")
+
+  # Replace placeholders
+  system_prompt="${system_prompt//\{\{ITERATION\}\}/$iteration}"
+  system_prompt="${system_prompt//\{\{PREVIOUS_FINDINGS\}\}/$previous_findings}"
+
+  # Append augmentation if provided
+  if [[ -n "$augmentation_file" && -f "$augmentation_file" ]]; then
+    system_prompt+=$'\n\n## Project-Specific Context\n\n'
     system_prompt+=$(cat "$augmentation_file")
   fi
 
@@ -237,12 +278,16 @@ EOF
 
 usage() {
   cat <<EOF
-Usage: gpt-review-api.sh <review_type> <content_file> [augmentation_file]
+Usage: gpt-review-api.sh <review_type> <content_file> [options]
 
 Arguments:
   review_type       Type of review: prd, sdd, sprint, code
   content_file      File containing content to review
-  augmentation_file Optional file with project-specific context
+
+Options:
+  --augmentation <file>  Project-specific context file
+  --iteration <N>        Review iteration (1 = first, 2+ = re-review)
+  --previous <file>      Previous findings JSON (required for iteration > 1)
 
 Environment:
   OPENAI_API_KEY    Required - Your OpenAI API key
@@ -260,13 +305,52 @@ EOF
 }
 
 main() {
-  local review_type="${1:-}"
-  local content_file="${2:-}"
-  local augmentation_file="${3:-}"
+  local review_type=""
+  local content_file=""
+  local augmentation_file=""
+  local iteration=1
+  local previous_file=""
+
+  # Parse arguments
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --augmentation)
+        augmentation_file="$2"
+        shift 2
+        ;;
+      --iteration)
+        iteration="$2"
+        shift 2
+        ;;
+      --previous)
+        previous_file="$2"
+        shift 2
+        ;;
+      --help|-h)
+        usage
+        exit 0
+        ;;
+      -*)
+        error "Unknown option: $1"
+        usage
+        exit 2
+        ;;
+      *)
+        if [[ -z "$review_type" ]]; then
+          review_type="$1"
+        elif [[ -z "$content_file" ]]; then
+          content_file="$1"
+        else
+          # Legacy positional: treat third arg as augmentation
+          augmentation_file="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
 
   # Load .env file if exists and OPENAI_API_KEY not already set
   if [[ -z "${OPENAI_API_KEY:-}" && -f ".env" ]]; then
-    # Extract OPENAI_API_KEY from .env (safely, without exposing other vars)
     local env_key
     env_key=$(grep -E "^OPENAI_API_KEY=" .env 2>/dev/null | cut -d'=' -f2- | tr -d '"' | tr -d "'" || true)
     if [[ -n "$env_key" ]]; then
@@ -314,21 +398,50 @@ main() {
   fi
 
   # Load configuration
+  MAX_ITERATIONS="${DEFAULT_MAX_ITERATIONS}"
   load_config
+
+  # Check for max iterations auto-approve
+  if [[ "$iteration" -gt "$MAX_ITERATIONS" ]]; then
+    log "Iteration $iteration exceeds max_iterations ($MAX_ITERATIONS) - auto-approving"
+    cat <<EOF
+{
+  "verdict": "APPROVED",
+  "summary": "Auto-approved after $MAX_ITERATIONS iterations (max_iterations reached)",
+  "auto_approved": true,
+  "iteration": $iteration,
+  "note": "Review converged by iteration limit. Consider adjusting max_iterations in config if needed."
+}
+EOF
+    exit 0
+  fi
 
   # Determine model and timeout
   local model="${GPT_REVIEW_MODEL:-${DEFAULT_MODELS[$review_type]}}"
   local timeout="${GPT_REVIEW_TIMEOUT:-$DEFAULT_TIMEOUT}"
 
   log "Review type: $review_type"
+  log "Iteration: $iteration"
   log "Model: $model"
   log "Timeout: ${timeout}s"
   log "Content file: $content_file"
   [[ -n "$augmentation_file" ]] && log "Augmentation: $augmentation_file"
+  [[ -n "$previous_file" ]] && log "Previous findings: $previous_file"
 
-  # Build prompt
+  # Build prompt based on iteration
   local system_prompt
-  system_prompt=$(build_system_prompt "$review_type" "$augmentation_file")
+  if [[ "$iteration" -eq 1 ]]; then
+    system_prompt=$(build_first_review_prompt "$review_type" "$augmentation_file")
+  else
+    # For re-review, we need previous findings
+    if [[ -z "$previous_file" || ! -f "$previous_file" ]]; then
+      error "Re-review (iteration > 1) requires --previous <file> with previous findings"
+      exit 2
+    fi
+    local previous_findings
+    previous_findings=$(cat "$previous_file")
+    system_prompt=$(build_re_review_prompt "$iteration" "$previous_findings" "$augmentation_file")
+  fi
 
   # Read content
   local content
@@ -337,6 +450,9 @@ main() {
   # Call API
   local response
   response=$(call_api "$model" "$system_prompt" "$content" "$timeout")
+
+  # Add iteration to response
+  response=$(echo "$response" | jq --arg iter "$iteration" '. + {iteration: ($iter | tonumber)}')
 
   # Output response
   echo "$response"

@@ -378,6 +378,7 @@ gpt_review:
   api_key_env: "OPENAI_API_KEY"  # Environment variable name for API key
   timeout_seconds: 300            # Per-request timeout
   max_retries: 3                  # Retry on transient failures
+  max_iterations: 3               # Auto-approve after N iterations (prevents infinite loops)
 
   # Model selection (must be chat-compatible models)
   models:
