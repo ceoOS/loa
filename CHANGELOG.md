@@ -5,6 +5,34 @@ All notable changes to Loa will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-01-19
+
+### Fixed
+
+- **Template Pollution**: `grimoires/loa/ledger.json` was being tracked in git and shipped with the template, causing new projects mounted with Loa to inherit development cycle history from the Loa framework itself.
+
+### Changed
+
+- Added `grimoires/loa/ledger.json` and `grimoires/loa/ledger.json.bak` to `.gitignore`
+- Removed existing `ledger.json` from git tracking
+
+### Remediation
+
+If you mounted Loa v1.0.0 and see "active cycle Documentation Coherence" or similar inherited state:
+
+```bash
+# Option 1: Delete the inherited ledger and start fresh
+rm grimoires/loa/ledger.json
+/plan-and-analyze
+
+# Option 2: Pull the fix via update
+/update-loa
+```
+
+New projects mounted from v1.0.1+ will start with a clean slate.
+
+---
+
 ## [1.0.0] - 2026-01-19 — Run Mode AI (Autonomous Initiation)
 
 ### Why This Release
@@ -1984,6 +2012,7 @@ loa-grimoire/           # Loa process artifacts
 └── deployment/         # Production infrastructure docs
 ```
 
+[1.0.1]: https://github.com/0xHoneyJar/loa/releases/tag/v1.0.1
 [1.0.0]: https://github.com/0xHoneyJar/loa/releases/tag/v1.0.0
 [0.19.0]: https://github.com/0xHoneyJar/loa/releases/tag/v0.19.0
 [0.18.0]: https://github.com/0xHoneyJar/loa/releases/tag/v0.18.0
