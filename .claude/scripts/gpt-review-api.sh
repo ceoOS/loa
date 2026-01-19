@@ -269,9 +269,13 @@ EOF
 
   # Extract content from response
   # - Chat Completions: .choices[0].message.content
-  # - Responses API: .output_text
+  # - Responses API: .output[].content[].text (find the message with output_text)
   local content_response
-  content_response=$(echo "$response" | jq -r '.choices[0].message.content // .output_text // empty')
+  content_response=$(echo "$response" | jq -r '
+    .choices[0].message.content //
+    (.output[] | select(.type == "message") | .content[] | select(.type == "output_text") | .text) //
+    empty
+  ')
 
   if [[ -z "$content_response" ]]; then
     error "No content in API response"
