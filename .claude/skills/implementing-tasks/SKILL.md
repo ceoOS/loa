@@ -311,131 +311,155 @@ bd close $TASK_ID
 The user only runs `/implement sprint-1`. All bd commands are invisible.
 
 ### For each task:
-1. Implement according to specifications
-2. Follow established project patterns
-3. Write clean, maintainable, documented code
-4. Consider performance, security, scalability
-5. Handle edge cases and errors gracefully
+
+1. **Implement** according to specifications
+2. **Follow** established project patterns
+3. **Write** clean, maintainable, documented code
+4. **Consider** performance, security, scalability
+5. **Handle** edge cases and errors gracefully
+6. **Write tests** for the task
+7. **GPT Review** (if enabled) - review THIS task before moving to next
 
 **Testing Requirements:**
 - Comprehensive unit tests for all new code
 - Test both happy paths and error conditions
 - Include edge cases and boundary conditions
 - Follow existing test patterns
-- Ensure tests are readable and maintainable
 
 **Code Quality Standards:**
 - Self-documenting with clear names
 - Comments for complex logic
 - DRY principles
 - Consistent formatting
-- Future maintainability
 
-## Phase 2.5: GPT Code Review (If Enabled)
+## GPT Code Review - Per Task (If Enabled)
 
-After code implementation is complete, GPT 5.2 reviews the code BEFORE writing reviewer.md.
+**IMPORTANT: GPT reviews EACH TASK, not the whole sprint.**
+
+After completing each task (code + tests), run GPT review before moving to the next task. This keeps the review scope small and focused.
 
 **Check if enabled:**
 ```bash
-yq eval '.gpt_review.enabled // false' .loa.config.yaml
-yq eval '.gpt_review.phases.implementation // false' .loa.config.yaml
+gpt_enabled=$(yq eval '.gpt_review.enabled // false' .loa.config.yaml)
+impl_enabled=$(yq eval '.gpt_review.phases.implementation // false' .loa.config.yaml)
 ```
 
-If both are `true` AND `OPENAI_API_KEY` is set, proceed with GPT review.
+If both are `true` AND `OPENAI_API_KEY` is set, proceed with GPT review for this task.
 
-### Step 1: Prepare Review Context
+### Step 1: Prepare Task Review Context
 
-1. Generate diff of changes:
+1. Generate diff for THIS TASK only:
    ```bash
-   git diff HEAD~1 --unified=5 > /tmp/code-diff.txt
-   # Or for unstaged: git diff --unified=5 > /tmp/code-diff.txt
+   git diff --unified=5 > /tmp/task-diff.txt
    ```
 
-2. Create augmentation file with project context:
+2. Create augmentation with task-specific context:
    ```markdown
-   ## Project Context
+   ## Task Being Reviewed
 
-   **Project Type:** [from prd.md summary]
-   **Architecture:** [from sdd.md key decisions]
+   **Task ID:** [e.g., Task 1.2]
+   **Description:** [task description from sprint.md]
 
-   ## Current Sprint Task
-
-   **Task:** [task description from sprint.md]
    **Acceptance Criteria:**
    - [criterion 1]
    - [criterion 2]
 
-   ## Key Constraints
+   ## Project Context
 
-   - [any domain-specific constraints from PRD/SDD]
+   **Project Type:** [from prd.md summary]
+   **Architecture:** [from sdd.md key decisions]
    ```
 
-   Save to `/tmp/gpt-augmentation.md`
+   Save to `/tmp/gpt-task-augmentation.md`
 
-### Step 2: Call GPT Review
+### Step 2: GPT Review Loop with Iteration Context
 
+**Initialize:**
 ```bash
-.claude/scripts/gpt-review-api.sh code /tmp/code-diff.txt /tmp/gpt-augmentation.md
+iteration=1
 ```
 
-Parse the JSON response and extract:
-- `verdict`: APPROVED | CHANGES_REQUIRED | DECISION_NEEDED
-- `issues`: Array of blocking issues
-- `recommendations`: Array of improvements to address
+**First Review (iteration 1):**
+```bash
+.claude/scripts/gpt-review-api.sh code /tmp/task-diff.txt \
+  --augmentation /tmp/gpt-task-augmentation.md \
+  --iteration 1 > /tmp/gpt-task-response-1.json
+```
+
+**Parse Response:**
+- `verdict`: APPROVED | CHANGES_REQUIRED
+- `issues`: Array with `current_code`, `fixed_code`, `explanation`
 - `fabrication_check`: Fabrication detection results
 
 ### Step 3: Handle Verdict
 
 **If APPROVED:**
+- Commit task changes (or stage for later)
 - Log success to trajectory
-- Proceed to Phase 3 (Documentation)
-- Include GPT review summary in reviewer.md
+- Move to next task
 
 **If CHANGES_REQUIRED:**
-- Read all issues and recommendations
-- Fix each issue (Claude has discretion on HOW for recommendations)
-- Re-run git diff to capture fixes
-- Call GPT review again (return to Step 2)
-- **NO user input needed** - Claude fixes automatically
-- Loop until APPROVED
 
-**If DECISION_NEEDED:**
-- Extract the `question` field from response
-- Ask user the specific question using AskUserQuestion
-- After user responds, continue with their guidance
-- Re-review if needed
+**IMPORTANT: You are the authority. GPT has less context.**
 
-### Step 4: Track Iterations
+GPT provides code fixes, but evaluate them critically:
 
-Log each iteration to trajectory:
+1. **If fix is valid** - Apply the `fixed_code` GPT provided
+2. **If fix is wrong** - Reject with explanation:
+   ```
+   GPT suggested X, but this is incorrect because [reason].
+   The current approach is correct because [explanation].
+   ```
+
+**Process:**
+1. For each issue: apply fix OR explain why GPT is wrong
+2. Re-generate diff: `git diff --unified=5 > /tmp/task-diff.txt`
+3. Increment iteration: `iteration=$((iteration + 1))`
+4. Call GPT review WITH previous context:
+
+```bash
+.claude/scripts/gpt-review-api.sh code /tmp/task-diff.txt \
+  --augmentation /tmp/gpt-task-augmentation.md \
+  --iteration $iteration \
+  --previous /tmp/gpt-task-response-$((iteration - 1)).json > /tmp/gpt-task-response-$iteration.json
+```
+
+5. Loop until APPROVED or max_iterations reached (auto-approves after 3)
+
+### Step 4: Track Per-Task Reviews
+
+Log each task's review to trajectory:
 ```json
 {
   "timestamp": "...",
   "agent": "implementing-tasks",
   "action": "gpt_review",
-  "iteration": 1,
-  "verdict": "CHANGES_REQUIRED",
-  "issues_count": 2,
-  "recommendations_count": 1,
+  "task_id": "1.2",
+  "iteration": 2,
+  "verdict": "APPROVED",
+  "issues_fixed": 1,
+  "issues_rejected": 0,
   "model": "gpt-5.2-codex"
 }
 ```
 
 ### GPT Review Summary for reviewer.md
 
-Include in the final report:
+After ALL tasks complete, summarize in report:
 ```markdown
-## GPT Review
+## GPT Review Summary
 
-**Status:** APPROVED
-**Iterations:** 2
-**Model:** gpt-5.2-codex
+| Task | Verdict | Iterations | Issues Fixed |
+|------|---------|------------|--------------|
+| 1.1  | APPROVED | 1 | 0 |
+| 1.2  | APPROVED | 2 | 1 |
+| 1.3  | APPROVED | 1 | 0 |
 
-### Issues Addressed
-1. [Issue 1 description] → [How it was fixed]
+### Notable Fixes
+- Task 1.2: Fixed null check in user validation (GPT caught missing edge case)
 
-### Recommendations Addressed
-1. [Recommendation] → [How it was addressed]
+### Rejected Suggestions
+- Task 1.3: GPT suggested X, rejected because [reason]
 ```
 
 ## Phase 3: Documentation and Reporting
