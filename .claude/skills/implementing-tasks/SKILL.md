@@ -551,6 +551,28 @@ See `resources/REFERENCE.md` for complete checklists:
 - Ignored existing patterns
 </checklists>
 
+<gpt_review>
+## GPT Review Step
+
+After completing code changes, run GPT cross-model review:
+
+```bash
+/gpt-review code
+```
+
+The command handles everything:
+- Checks if GPT review is enabled in config
+- If disabled: returns SKIPPED, continue normally
+- If enabled: sends code to GPT 5.2 for review
+
+**Handle the verdict:**
+- `SKIPPED` → Continue (review is disabled)
+- `APPROVED` → Continue (code is good)
+- `CHANGES_REQUIRED` → Fix issues and re-run `/gpt-review code`
+
+No DECISION_NEEDED for code reviews - Claude and GPT work together automatically.
+</gpt_review>
+
 <beads_workflow>
 ## Beads Workflow (beads_rust)
 

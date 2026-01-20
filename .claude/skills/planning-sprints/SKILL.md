@@ -385,3 +385,24 @@ br sync --flush-only  # Export SQLite → JSONL before commit
 
 **Protocol Reference**: See `.claude/protocols/beads-integration.md`
 </beads_workflow>
+
+<gpt_review>
+## GPT Review Step
+
+Before writing the final sprint plan, run GPT cross-model review:
+
+```bash
+/gpt-review sprint
+```
+
+The command handles everything:
+- Checks if GPT review is enabled in config
+- If disabled: returns SKIPPED, continue normally
+- If enabled: sends sprint plan to GPT 5.2 for review
+
+**Handle the verdict:**
+- `SKIPPED` → Continue (review is disabled)
+- `APPROVED` → Write final sprint.md
+- `CHANGES_REQUIRED` → Fix issues and re-run `/gpt-review sprint`
+- `DECISION_NEEDED` → Ask user the planning question, incorporate answer, re-run
+</gpt_review>

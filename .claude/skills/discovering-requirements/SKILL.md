@@ -406,3 +406,24 @@ Every claim about existing context must include citation:
 | Partial coverage | Conduct mini-interviews for gaps only |
 | Developer disagrees with synthesis | Allow corrections, update understanding |
 </edge_cases>
+
+<gpt_review>
+## GPT Review Step
+
+Before writing the final PRD, run GPT cross-model review:
+
+```bash
+/gpt-review prd
+```
+
+The command handles everything:
+- Checks if GPT review is enabled in config
+- If disabled: returns SKIPPED, continue normally
+- If enabled: sends PRD to GPT 5.2 for review
+
+**Handle the verdict:**
+- `SKIPPED` → Continue (review is disabled)
+- `APPROVED` → Write final prd.md
+- `CHANGES_REQUIRED` → Fix issues and re-run `/gpt-review prd`
+- `DECISION_NEEDED` → Ask user the question, incorporate answer, re-run
+</gpt_review>

@@ -283,3 +283,24 @@ When making architectural choices:
 - Use diagrams or structured text to illustrate complex concepts
 - Provide concrete examples and sample code where helpful
 </communication_style>
+
+<gpt_review>
+## GPT Review Step
+
+Before writing the final SDD, run GPT cross-model review:
+
+```bash
+/gpt-review sdd
+```
+
+The command handles everything:
+- Checks if GPT review is enabled in config
+- If disabled: returns SKIPPED, continue normally
+- If enabled: sends SDD to GPT 5.2 for review
+
+**Handle the verdict:**
+- `SKIPPED` → Continue (review is disabled)
+- `APPROVED` → Write final sdd.md
+- `CHANGES_REQUIRED` → Fix issues and re-run `/gpt-review sdd`
+- `DECISION_NEEDED` → Ask user the architecture question, incorporate answer, re-run
+</gpt_review>
