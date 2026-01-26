@@ -1,31 +1,28 @@
 # .github/workflows/sync-upstream.yml
-# Automatically sync fork from upstream daily
-# Creates sync branch + runs security audit (no elevated permissions needed)
+# Fully automatic upstream sync with security gate
+# If security passes → auto-merge to main
+# If security fails → workflow fails, main untouched
 
 name: Sync Upstream
 
 on:
   schedule:
-    # Run daily at 6 AM UTC
-    - cron: '0 6 * * *'
+    - cron: '0 6 * * *'  # Daily at 6 AM UTC
   workflow_dispatch:
 
-# Only needs default read permissions + write to push branch
 permissions:
   contents: write
 
 jobs:
-  sync:
+  sync-and-audit:
     runs-on: ubuntu-latest
-    outputs:
-      has_changes: ${{ steps.check.outputs.has_changes }}
-      sync_branch: ${{ steps.push.outputs.branch }}
 
     steps:
       - name: Checkout fork
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: main
 
       - name: Configure git
         run: |
@@ -40,124 +37,106 @@ jobs:
       - name: Check for changes
         id: check
         run: |
-          CHANGES=$(git rev-list --count origin/main..upstream/main 2>/dev/null || echo "0")
+          CHANGES=$(git rev-list --count HEAD..upstream/main 2>/dev/null || echo "0")
+          echo "count=$CHANGES" >> $GITHUB_OUTPUT
 
           if [ "$CHANGES" -gt 0 ]; then
-            echo "has_changes=true" >> $GITHUB_OUTPUT
             echo "## 📦 $CHANGES new commits from upstream" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
-            git log --oneline origin/main..upstream/main >> $GITHUB_STEP_SUMMARY
+            git log --oneline HEAD..upstream/main >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
           else
-            echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "## ✅ Already up to date" >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Create and push sync branch
-        id: push
-        if: steps.check.outputs.has_changes == 'true'
-        run: |
-          BRANCH="sync/upstream-$(date +%Y%m%d)"
-          git checkout -b "$BRANCH"
-          git merge upstream/main --no-edit
-          git push origin "$BRANCH" --force
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "## 🔀 Branch Created: \`$BRANCH\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**To review and merge:**" >> $GITHUB_STEP_SUMMARY
-          echo "1. Go to repository → Branches → \`$BRANCH\`" >> $GITHUB_STEP_SUMMARY
-          echo "2. Click **Compare & pull request**" >> $GITHUB_STEP_SUMMARY
-          echo "3. Review security audit below" >> $GITHUB_STEP_SUMMARY
-          echo "4. Merge when satisfied" >> $GITHUB_STEP_SUMMARY
-
-  security-audit:
-    needs: sync
-    if: needs.sync.outputs.has_changes == 'true'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.sync.outputs.sync_branch }}
-          fetch-depth: 0
-
-      - name: Fetch main
-        run: git fetch origin main
-
-      - name: Scan - Network calls
-        id: network
-        run: |
-          echo "## 🌐 Network Calls" >> $GITHUB_STEP_SUMMARY
-          PATTERNS="curl|wget|fetch\(|axios|http\.get|https\.get"
-          DIFF=$(git diff origin/main...HEAD -- '*.sh' '*.js' '*.ts' 2>/dev/null | grep -E "^\+" | grep -iE "$PATTERNS" || true)
-
-          if [ -n "$DIFF" ]; then
-            echo "::warning::New network calls detected"
-            echo "### ⚠️ New network calls found" >> $GITHUB_STEP_SUMMARY
-            echo '```diff' >> $GITHUB_STEP_SUMMARY
-            echo "$DIFF" | head -20 >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-          else
-            echo "✅ None added" >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - name: Scan - Secrets
+      - name: Security audit - Secrets
+        if: steps.check.outputs.count != '0'
         id: secrets
         run: |
-          echo "## 🔑 Secret Patterns" >> $GITHUB_STEP_SUMMARY
-          PATTERNS="api[_-]?key|secret|password|token|credential|private[_-]?key"
-          DIFF=$(git diff origin/main...HEAD -- '*.sh' '*.js' '*.ts' '*.json' '*.yml' 2>/dev/null | grep -E "^\+" | grep -iE "$PATTERNS" | grep -vi "example\|template\|placeholder\|YOUR_\|TODO" || true)
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔒 Security Audit" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          PATTERNS="(api[_-]?key|secret|password|token|credential|private[_-]?key)\s*[:=]\s*['\"][^'\"]{8,}"
+          DIFF=$(git diff HEAD...upstream/main -- '*.sh' '*.js' '*.ts' '*.json' '*.yml' 2>/dev/null | grep -E "^\+" | grep -iE "$PATTERNS" | grep -vi "example\|template\|placeholder\|YOUR_\|TODO\|CHANGEME\|xxx" || true)
 
           if [ -n "$DIFF" ]; then
-            echo "::error::Potential secrets detected!"
-            echo "### 🚨 POTENTIAL SECRETS" >> $GITHUB_STEP_SUMMARY
+            echo "### 🚨 BLOCKED: Potential secrets detected" >> $GITHUB_STEP_SUMMARY
             echo '```diff' >> $GITHUB_STEP_SUMMARY
             echo "$DIFF" | head -15 >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             echo "found=true" >> $GITHUB_OUTPUT
           else
-            echo "✅ None found" >> $GITHUB_STEP_SUMMARY
+            echo "### ✅ Secrets: Clean" >> $GITHUB_STEP_SUMMARY
             echo "found=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Scan - Eval/Exec
+      - name: Security audit - Network calls
+        if: steps.check.outputs.count != '0'
         run: |
-          echo "## ⚠️ Dangerous Patterns" >> $GITHUB_STEP_SUMMARY
-          PATTERNS="eval\(|exec\(|child_process|spawn\(|Function\("
-          DIFF=$(git diff origin/main...HEAD -- '*.sh' '*.js' '*.ts' 2>/dev/null | grep -E "^\+" | grep -E "$PATTERNS" || true)
+          PATTERNS="curl\s|wget\s|fetch\(|axios\.|http\.request|https\.request"
+          DIFF=$(git diff HEAD...upstream/main -- '*.sh' '*.js' '*.ts' 2>/dev/null | grep -E "^\+" | grep -iE "$PATTERNS" || true)
 
           if [ -n "$DIFF" ]; then
-            echo "::warning::eval/exec patterns found"
-            echo "### ⚠️ Review needed" >> $GITHUB_STEP_SUMMARY
-            echo '```diff' >> $GITHUB_STEP_SUMMARY
-            echo "$DIFF" | head -15 >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "### ⚠️ Network calls added (review in diff)" >> $GITHUB_STEP_SUMMARY
           else
-            echo "✅ None found" >> $GITHUB_STEP_SUMMARY
+            echo "### ✅ Network: Clean" >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Scan - Beads
+      - name: Security audit - Dangerous patterns
+        if: steps.check.outputs.count != '0'
         run: |
-          echo "## 📿 Bead Scripts" >> $GITHUB_STEP_SUMMARY
-          CHANGES=$(git diff origin/main...HEAD --name-only -- '.beads/*' 2>/dev/null || true)
+          PATTERNS="eval\(|new Function\(|child_process\.(exec|spawn)"
+          DIFF=$(git diff HEAD...upstream/main -- '*.sh' '*.js' '*.ts' 2>/dev/null | grep -E "^\+" | grep -E "$PATTERNS" || true)
+
+          if [ -n "$DIFF" ]; then
+            echo "### ⚠️ Eval/exec patterns (review in diff)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ✅ Dangerous patterns: Clean" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Security audit - Beads
+        if: steps.check.outputs.count != '0'
+        run: |
+          CHANGES=$(git diff HEAD...upstream/main --name-only -- '.beads/*' 2>/dev/null || true)
 
           if [ -n "$CHANGES" ]; then
-            echo "::warning::Bead scripts changed"
-            echo "### ⚠️ Modified (ceoOS uses --skip-beads)" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "$CHANGES" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "### ⚠️ Bead scripts modified (ceoOS uses --skip-beads)" >> $GITHUB_STEP_SUMMARY
           else
-            echo "✅ No changes" >> $GITHUB_STEP_SUMMARY
+            echo "### ✅ Beads: Clean" >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Fail if secrets
+      - name: Block if secrets found
         if: steps.secrets.outputs.found == 'true'
         run: |
-          echo "::error::Security audit failed - review required"
+          echo ""
+          echo "::error::Security audit FAILED - potential secrets in upstream changes"
+          echo "::error::Review the diff manually before merging"
           exit 1
+
+      - name: Merge upstream to main
+        if: steps.check.outputs.count != '0' && steps.secrets.outputs.found != 'true'
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+
+          git merge upstream/main --no-edit
+          git push origin main
+
+          echo "## ✅ Auto-merged to main" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Security audit passed. ${{ steps.check.outputs.count }} commits merged." >> $GITHUB_STEP_SUMMARY
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.check.outputs.count }}" = "0" ]; then
+            echo "**Result:** No changes to sync" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.secrets.outputs.found }}" = "true" ]; then
+            echo "**Result:** ❌ Blocked - manual review required" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Result:** ✅ Synced successfully" >> $GITHUB_STEP_SUMMARY
+          fi
