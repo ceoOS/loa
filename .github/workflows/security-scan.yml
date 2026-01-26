@@ -1,0 +1,87 @@
+# .github/workflows/security-scan.yml
+# Run security scan on any PR or manually
+
+name: Security Scan
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin ${{ github.base_ref }}
+
+      - name: Set comparison ref
+        id: refs
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "base=origin/${{ github.base_ref }}" >> $GITHUB_OUTPUT
+          else
+            echo "base=HEAD~10" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Scan for network calls
+        run: |
+          echo "## Scanning for network calls..."
+          PATTERNS="curl|wget|fetch\(|axios|node-fetch|http\.get|https\.get"
+
+          # Find all network calls in codebase
+          grep -rn -E "$PATTERNS" --include="*.sh" --include="*.js" --include="*.ts" . 2>/dev/null | head -50 || echo "None found"
+
+      - name: Scan for eval/exec patterns
+        run: |
+          echo "## Scanning for eval/exec patterns..."
+          PATTERNS="eval\(|new Function|child_process\.exec|\.exec\(|\.spawn\("
+
+          grep -rn -E "$PATTERNS" --include="*.sh" --include="*.js" --include="*.ts" . 2>/dev/null | head -50 || echo "None found"
+
+      - name: Scan for hardcoded secrets
+        run: |
+          echo "## Scanning for hardcoded secrets..."
+
+          # Common secret patterns (base64, hex strings, etc.)
+          # Exclude obvious non-secrets
+          grep -rn -E "(api[_-]?key|secret|password|token)\s*[:=]\s*['\"][^'\"]{8,}['\"]" \
+            --include="*.sh" --include="*.js" --include="*.ts" --include="*.json" \
+            . 2>/dev/null | \
+            grep -v "example\|template\|placeholder\|YOUR_\|xxx\|changeme" | \
+            head -20 || echo "None found"
+
+      - name: Check .beads directory
+        run: |
+          echo "## Checking .beads directory..."
+
+          if [ -d ".beads" ]; then
+            echo "⚠️ .beads directory exists"
+            echo "Contents:"
+            find .beads -type f -name "*.sh" -o -name "*.js" 2>/dev/null | head -20
+
+            echo ""
+            echo "Reminder: ceoOS mounts with --skip-beads by default"
+          else
+            echo "✅ No .beads directory"
+          fi
+
+      - name: List executable files
+        run: |
+          echo "## Executable files..."
+          find . -type f -executable -not -path "./.git/*" 2>/dev/null | head -30
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Security scan complete. Review findings above."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
