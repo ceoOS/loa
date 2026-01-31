@@ -119,8 +119,9 @@ check_dependencies() {
 check_bash_version
 check_dependencies
 
-# Initialize index directory
+# Initialize index directory (ORACLE-L-3: set restrictive umask before mkdir)
 init_index() {
+    umask 077
     mkdir -p "$INDEX_DIR"
 }
 
@@ -194,7 +195,8 @@ index_feedback() {
         return
     fi
 
-    for file in grimoires/loa/feedback/*.yaml; do
+    # ORACLE-M-1: Use find with -print0 and read -d '' to handle filenames safely
+    while IFS= read -r -d '' file; do
         [[ -f "$file" ]] || continue
 
         # Parse YAML learnings using yq (python wrapper) or fallback
@@ -229,7 +231,7 @@ index_feedback() {
         fi
 
         ((count++))
-    done
+    done < <(find grimoires/loa/feedback -maxdepth 1 -name "*.yaml" -type f -print0 2>/dev/null)
 
     echo "$output" > "$FEEDBACK_INDEX"
     echo "$count"
@@ -373,8 +375,8 @@ query_with_grep() {
     local pattern
     pattern=$(echo "$terms" | sed 's/|/|/g')
 
-    # Export for jq to use
-    export SEARCH_PATTERN="$pattern"
+    # ORACLE-L-1: Pass pattern directly to jq via --arg instead of environment variable
+    local SEARCH_PATTERN="$pattern"
 
     # Search each index
     for idx_file in "$SKILLS_INDEX" "$FEEDBACK_INDEX" "$DECISIONS_INDEX" "$LEARNINGS_INDEX"; do
@@ -414,10 +416,10 @@ query_with_grep() {
         }]
     ' 2>/dev/null || echo "[]")
 
-    # Sort by score and limit
+    # ORACLE-L-4: Sort by score and limit using jq limit() for efficiency with large indexes
     results=$(echo "$results" | jq --argjson limit "$limit" '
-        sort_by(-.score) | .[:$limit]
-    ')
+        sort_by(-.score) | limit($limit; .[])
+    ' | jq -s '.')
 
     # Track query if requested
     if [[ "$track" == "true" ]]; then
@@ -518,9 +520,14 @@ track_query() {
                 ]
             ' "$learnings_file" 2>/dev/null)
 
+            # ORACLE-M-2: Use flock for atomic file updates to prevent TOCTOU race
             if [[ -n "$updated" && "$updated" != "null" ]]; then
-                echo "$updated" > "$learnings_file.tmp"
-                mv "$learnings_file.tmp" "$learnings_file"
+                (
+                    flock -x 200 || { echo -e "${RED}Failed to acquire lock${NC}" >&2; exit 1; }
+                    echo "$updated" > "$learnings_file.tmp"
+                    mv "$learnings_file.tmp" "$learnings_file"
+                ) 200>"$learnings_file.lock"
+                rm -f "$learnings_file.lock"
                 echo -e "${BLUE}Updated effectiveness for learning $id${NC}" >&2
             fi
         done
@@ -627,6 +634,29 @@ log_index_event() {
     echo "$event" >> "$trajectory_file"
 }
 
+# ORACLE-M-3: Validate path is within allowed directories (no traversal)
+validate_path() {
+    local file="$1"
+    local resolved_path
+    local project_root_resolved
+
+    # Resolve to absolute path
+    resolved_path=$(realpath -m "$file" 2>/dev/null || readlink -f "$file" 2>/dev/null || echo "$file")
+    project_root_resolved=$(realpath -m "$PROJECT_ROOT" 2>/dev/null || readlink -f "$PROJECT_ROOT" 2>/dev/null || echo "$PROJECT_ROOT")
+
+    # Check if resolved path is within project root
+    if [[ "$resolved_path" != "$project_root_resolved"* ]]; then
+        return 1
+    fi
+
+    # Additional check: no .. components in the resolved path
+    if [[ "$resolved_path" == *".."* ]]; then
+        return 1
+    fi
+
+    return 0
+}
+
 # Add file to index incrementally
 add_to_index() {
     local file="$1"
@@ -634,6 +664,12 @@ add_to_index() {
 
     if [[ ! -f "$file" ]]; then
         echo -e "${RED}File not found: $file${NC}" >&2
+        return 1
+    fi
+
+    # ORACLE-M-3: Validate path traversal
+    if ! validate_path "$file"; then
+        echo -e "${RED}Path traversal detected or file outside project: $file${NC}" >&2
         return 1
     fi
 
@@ -880,9 +916,10 @@ Usage:
   loa-learnings-index.sh add <file>        Add/update a file in the index
 
 Query Options:
-  --format <json|text>    Output format (default: text)
+  --format <text|json>    Output format: text (Recommended), json
   --limit <N>             Maximum results (default: 10)
   --track                 Track query for effectiveness metrics
+  --index <auto|qmd|grep> Indexer: auto (Recommended), qmd, grep
 
 Examples:
   loa-learnings-index.sh index

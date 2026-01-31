@@ -174,8 +174,9 @@ INTEREST_AREAS=(
     "files"
 )
 
-# Initialize cache directory
+# Initialize cache directory (ORACLE-L-3: set restrictive umask before mkdir)
 init_cache() {
+    umask 077
     mkdir -p "$CACHE_DIR"
 }
 
@@ -235,7 +236,8 @@ fetch_source() {
         return 0
     fi
 
-    if curl -sL --max-time 30 "$url" -o "$cache_file" 2>/dev/null; then
+    # ORACLE-L-2: Add --fail-with-body to properly handle HTTP errors
+    if curl -sL --fail-with-body --max-time 30 "$url" -o "$cache_file" 2>/dev/null; then
         echo "$cache_file"
         return 0
     else
@@ -404,28 +406,24 @@ query_loa_with_grep() {
 
     cd "$PROJECT_ROOT" || return
 
-    # Search skills
+    # Search skills (ORACLE-M-1: use find with -print0 and read -d '' to handle filenames safely)
     if [[ -d ".claude/skills" ]]; then
-        local skill_matches
-        skill_matches=$(grep -r -l -i "$pattern" .claude/skills/*.md .claude/skills/**/*.md 2>/dev/null || true)
-        for match in $skill_matches; do
+        while IFS= read -r -d '' match; do
             local snippet
             snippet=$(grep -i -m 1 "$pattern" "$match" 2>/dev/null | head -c 200 || true)
             results=$(echo "$results" | jq --arg file "$match" --arg snippet "$snippet" \
                 '. + [{"source": "loa", "type": "skill", "file": $file, "snippet": $snippet, "score": 0.7, "weight": 1.0}]')
-        done
+        done < <(find .claude/skills -name "*.md" -type f -exec grep -l -i "$pattern" {} + -print0 2>/dev/null || true)
     fi
 
-    # Search feedback
+    # Search feedback (ORACLE-M-1: use find with -print0 and read -d '' to handle filenames safely)
     if [[ -d "grimoires/loa/feedback" ]]; then
-        local feedback_matches
-        feedback_matches=$(grep -r -l -i "$pattern" grimoires/loa/feedback/*.yaml 2>/dev/null || true)
-        for match in $feedback_matches; do
+        while IFS= read -r -d '' match; do
             local snippet
             snippet=$(grep -i -m 1 "$pattern" "$match" 2>/dev/null | head -c 200 || true)
             results=$(echo "$results" | jq --arg file "$match" --arg snippet "$snippet" \
                 '. + [{"source": "loa", "type": "feedback", "file": $file, "snippet": $snippet, "score": 0.8, "weight": 1.0}]')
-        done
+        done < <(find grimoires/loa/feedback -name "*.yaml" -type f -exec grep -l -i "$pattern" {} + -print0 2>/dev/null || true)
     fi
 
     # Search decisions
@@ -767,11 +765,11 @@ Query Command:
   anthropic-oracle.sh query "agents|mcp" --scope all      # Query all sources (default)
 
 Query Options:
-  --scope <loa|anthropic|all>   Source scope (default: from config or 'all')
-  --format <json|text>          Output format (default: text)
-  --limit <N>                   Max results (default: from config or 10)
+  --scope <all|loa|anthropic>   Source scope: all (Recommended), loa, anthropic
+  --format <text|json>          Output format: text (Recommended), json
+  --limit <N>                   Max results (default: 10)
   --min-weight <0.0-1.0>        Minimum source weight filter
-  --index <auto|qmd|grep>       Force indexer (default: from config or 'auto')
+  --index <auto|qmd|grep>       Indexer: auto (Recommended), qmd, grep
                                 auto: use QMD if available, fallback to grep
                                 qmd: require QMD semantic search
                                 grep: force grep-based search
