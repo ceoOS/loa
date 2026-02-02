@@ -1,0 +1,287 @@
+# .github/workflows/sync-upstream.yml
+# Hardened automatic upstream sync
+# Blocks on: secrets, network calls, eval/exec, package changes, binaries, obfuscation
+
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-and-audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/0xHoneyJar/loa.git || true
+          git fetch upstream main --depth=100
+
+      - name: Check for changes
+        id: check
+        run: |
+          CHANGES=$(git rev-list --count HEAD..upstream/main 2>/dev/null || echo "0")
+          echo "count=$CHANGES" >> $GITHUB_OUTPUT
+
+          if [ "$CHANGES" -gt 0 ]; then
+            echo "## 📦 $CHANGES new commits from upstream" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            git log --oneline HEAD..upstream/main >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ✅ Already up to date" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      # === BLOCKING CHECKS ===
+
+      - name: "🚨 Check: Secrets"
+        if: steps.check.outputs.count != '0'
+        id: secrets
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔒 Security Audit (Hardened)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Pattern: key/secret/password/token followed by assignment with 8+ char value
+          PATTERNS="(api[_-]?key|secret|password|token|credential|private[_-]?key|auth)\s*[:=]\s*['\"][^'\"]{8,}"
+          DIFF=$(git diff HEAD...upstream/main -- '*.sh' '*.js' '*.ts' '*.json' '*.yml' '*.yaml' '*.env*' 2>/dev/null | grep -E "^\+" | grep -iE "$PATTERNS" | grep -vi "example\|template\|placeholder\|YOUR_\|TODO\|CHANGEME\|xxx\|process\.env\|getenv\|os\.environ" || true)
+
+          if [ -n "$DIFF" ]; then
+            echo "### 🚨 BLOCKED: Secrets" >> $GITHUB_STEP_SUMMARY
+            echo '```diff' >> $GITHUB_STEP_SUMMARY
+            echo "$DIFF" | head -20 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "blocked=true" >> $GITHUB_OUTPUT
+          else
+            echo "### ✅ Secrets: Clean" >> $GITHUB_STEP_SUMMARY
+            echo "blocked=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: "🚨 Check: Base64/Encoded data"
+        if: steps.check.outputs.count != '0'
+        id: encoded
+        run: |
+          # Detect base64 encoded strings (40+ chars of base64 alphabet)
+          # And hex strings (40+ chars)
+          DIFF=$(git diff HEAD...upstream/main -- '*.sh' '*.js' '*.ts' 2>/dev/null | grep -E "^\+" | grep -E "(atob|btoa|Buffer\.from|base64|[A-Za-z0-9+/]{40,}=*|\\\\x[0-9a-fA-F]{40,})" | grep -vi "test\|spec\|example\|readme\|\.md" || true)
+
+          if [ -n "$DIFF" ]; then
+            echo "### 🚨 BLOCKED: Encoded/obfuscated data" >> $GITHUB_STEP_SUMMARY
+            echo '```diff' >> $GITHUB_STEP_SUMMARY
+            echo "$DIFF" | head -15 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "blocked=true" >> $GITHUB_OUTPUT
+          else
+            echo "### ✅ Encoded data: Clean" >> $GITHUB_STEP_SUMMARY
+            echo "blocked=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: "🚨 Check: Network calls"
+        if: steps.check.outputs.count != '0'
+        id: network
+        run: |
+          # Any new network call is suspicious
+          PATTERNS="curl\s|wget\s|fetch\(|axios|got\(|request\(|http\.(get|post|request)|https\.(get|post|request)|net\.connect|dgram\."
+          DIFF=$(git diff HEAD...upstream/main -- '*.sh' '*.js' '*.ts' 2>/dev/null | grep -E "^\+" | grep -iE "$PATTERNS" || true)
+
+          if [ -n "$DIFF" ]; then
+            echo "### 🚨 BLOCKED: New network calls" >> $GITHUB_STEP_SUMMARY
+            echo '```diff' >> $GITHUB_STEP_SUMMARY
+            echo "$DIFF" | head -15 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "blocked=true" >> $GITHUB_OUTPUT
+          else
+            echo "### ✅ Network: Clean" >> $GITHUB_STEP_SUMMARY
+            echo "blocked=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: "🚨 Check: Code execution patterns"
+        if: steps.check.outputs.count != '0'
+        id: exec
+        run: |
+          # eval, Function constructor, child_process, vm module
+          PATTERNS="eval\(|new Function\(|child_process|\.exec\(|\.spawn\(|\.execSync|\.spawnSync|require\(['\"]vm['\"]\)|vm\.run"
+          DIFF=$(git diff HEAD...upstream/main -- '*.sh' '*.js' '*.ts' 2>/dev/null | grep -E "^\+" | grep -E "$PATTERNS" || true)
+
+          if [ -n "$DIFF" ]; then
+            echo "### 🚨 BLOCKED: Code execution patterns" >> $GITHUB_STEP_SUMMARY
+            echo '```diff' >> $GITHUB_STEP_SUMMARY
+            echo "$DIFF" | head -15 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "blocked=true" >> $GITHUB_OUTPUT
+          else
+            echo "### ✅ Exec patterns: Clean" >> $GITHUB_STEP_SUMMARY
+            echo "blocked=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: "🚨 Check: Package dependencies"
+        if: steps.check.outputs.count != '0'
+        id: deps
+        run: |
+          # Any changes to package.json or lock files
+          CHANGES=$(git diff HEAD...upstream/main --name-only -- 'package.json' 'package-lock.json' 'yarn.lock' 'pnpm-lock.yaml' 'bun.lockb' 2>/dev/null || true)
+
+          if [ -n "$CHANGES" ]; then
+            echo "### 🚨 BLOCKED: Package dependencies changed" >> $GITHUB_STEP_SUMMARY
+            echo "Files modified:" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "$CHANGES" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            # Show what deps changed
+            git diff HEAD...upstream/main -- package.json 2>/dev/null | grep -E "^\+.*\"(dependencies|devDependencies)\"" -A 50 | head -30 >> $GITHUB_STEP_SUMMARY || true
+            echo "blocked=true" >> $GITHUB_OUTPUT
+          else
+            echo "### ✅ Dependencies: Clean" >> $GITHUB_STEP_SUMMARY
+            echo "blocked=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: "🚨 Check: Binary/executable files"
+        if: steps.check.outputs.count != '0'
+        id: binaries
+        run: |
+          # New binary or executable files
+          NEW_FILES=$(git diff HEAD...upstream/main --name-only --diff-filter=A 2>/dev/null || true)
+          SUSPICIOUS=""
+
+          for file in $NEW_FILES; do
+            # Check for binary extensions or executable
+            if echo "$file" | grep -qE "\.(exe|dll|so|dylib|bin|wasm|node)$"; then
+              SUSPICIOUS="$SUSPICIOUS$file\n"
+            fi
+          done
+
+          # Check for new files with executable bit
+          EXEC_FILES=$(git diff HEAD...upstream/main --diff-filter=A --raw 2>/dev/null | grep -E "^:000000 100755" | awk '{print $6}' || true)
+          if [ -n "$EXEC_FILES" ]; then
+            SUSPICIOUS="$SUSPICIOUS$EXEC_FILES"
+          fi
+
+          if [ -n "$SUSPICIOUS" ]; then
+            echo "### 🚨 BLOCKED: Binary/executable files added" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo -e "$SUSPICIOUS" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "blocked=true" >> $GITHUB_OUTPUT
+          else
+            echo "### ✅ Binaries: Clean" >> $GITHUB_STEP_SUMMARY
+            echo "blocked=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: "🚨 Check: Bead scripts"
+        if: steps.check.outputs.count != '0'
+        id: beads
+        run: |
+          CHANGES=$(git diff HEAD...upstream/main --name-only -- '.beads/*' '**/.beads/*' 2>/dev/null || true)
+
+          if [ -n "$CHANGES" ]; then
+            echo "### 🚨 BLOCKED: Bead scripts modified" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "$CHANGES" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "blocked=true" >> $GITHUB_OUTPUT
+          else
+            echo "### ✅ Beads: Clean" >> $GITHUB_STEP_SUMMARY
+            echo "blocked=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: "🚨 Check: Shell injection patterns"
+        if: steps.check.outputs.count != '0'
+        id: shell
+        run: |
+          # Backticks, $() in strings, semicolon injection
+          PATTERNS='\$\(|`[^`]+`|\;\s*(rm|curl|wget|nc|bash|sh|python|perl|ruby)'
+          DIFF=$(git diff HEAD...upstream/main -- '*.sh' '*.js' '*.ts' 2>/dev/null | grep -E "^\+" | grep -E "$PATTERNS" | grep -vi "test\|spec\|example" || true)
+
+          if [ -n "$DIFF" ]; then
+            echo "### 🚨 BLOCKED: Shell injection patterns" >> $GITHUB_STEP_SUMMARY
+            echo '```diff' >> $GITHUB_STEP_SUMMARY
+            echo "$DIFF" | head -15 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "blocked=true" >> $GITHUB_OUTPUT
+          else
+            echo "### ✅ Shell patterns: Clean" >> $GITHUB_STEP_SUMMARY
+            echo "blocked=false" >> $GITHUB_OUTPUT
+          fi
+
+      # === DECISION ===
+
+      - name: Evaluate security
+        id: security
+        if: steps.check.outputs.count != '0'
+        run: |
+          DOMINATED="false"
+
+          if [ "${{ steps.secrets.outputs.blocked }}" = "true" ]; then BLOCKED="true"; fi
+          if [ "${{ steps.encoded.outputs.blocked }}" = "true" ]; then BLOCKED="true"; fi
+          if [ "${{ steps.network.outputs.blocked }}" = "true" ]; then BLOCKED="true"; fi
+          if [ "${{ steps.exec.outputs.blocked }}" = "true" ]; then BLOCKED="true"; fi
+          if [ "${{ steps.deps.outputs.blocked }}" = "true" ]; then BLOCKED="true"; fi
+          if [ "${{ steps.binaries.outputs.blocked }}" = "true" ]; then BLOCKED="true"; fi
+          if [ "${{ steps.beads.outputs.blocked }}" = "true" ]; then BLOCKED="true"; fi
+          if [ "${{ steps.shell.outputs.blocked }}" = "true" ]; then BLOCKED="true"; fi
+
+          echo "blocked=${BLOCKED:-false}" >> $GITHUB_OUTPUT
+
+      - name: Block if security failed
+        if: steps.security.outputs.blocked == 'true'
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "## ❌ BLOCKED" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Security audit failed. Manual review required." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To review and merge manually:" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "git fetch upstream main" >> $GITHUB_STEP_SUMMARY
+          echo "git diff main...upstream/main" >> $GITHUB_STEP_SUMMARY
+          echo "# If safe:" >> $GITHUB_STEP_SUMMARY
+          echo "git merge upstream/main && git push" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          echo "::error::Security audit FAILED - manual review required"
+          exit 1
+
+      - name: Merge upstream to main
+        if: steps.check.outputs.count != '0' && steps.security.outputs.blocked != 'true'
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+
+          git merge upstream/main --no-edit
+          git push origin main
+
+          echo "## ✅ Auto-merged" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All security checks passed. ${{ steps.check.outputs.count }} commits merged." >> $GITHUB_STEP_SUMMARY
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.check.outputs.count }}" = "0" ]; then
+            echo "**Result:** No changes" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.security.outputs.blocked }}" = "true" ]; then
+            echo "**Result:** ❌ Blocked" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Result:** ✅ Synced" >> $GITHUB_STEP_SUMMARY
+          fi
